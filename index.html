@@ -8,30 +8,12 @@
 body{font-family:Arial;background:#f0f2f5;padding:15px}
 h1{text-align:center}
 h2{margin-top:20px}
-
 .dashboard{background:#fff;padding:15px;border-radius:12px;margin-bottom:15px}
-
-.machine{
-  background:#fff;
-  padding:15px;
-  margin:10px 0;
-  border-radius:12px;
-  position:relative;
-}
-
+.machine{background:#fff;padding:15px;margin:10px 0;border-radius:12px;position:relative}
 .available{border-left:8px solid #4caf50}
 .using{border-left:8px solid #ff9800}
 .finished{border-left:8px solid #f44336}
-
-button{
-  margin:6px 4px;
-  padding:10px 14px;
-  font-size:15px;
-  border:none;
-  border-radius:8px;
-  cursor:pointer;
-}
-
+button{margin:6px 4px;padding:10px 14px;font-size:15px;border:none;border-radius:8px;cursor:pointer}
 .start{background:#4caf50;color:#fff}
 .reserve{background:#2196f3;color:#fff}
 .finish{background:#ff5722;color:#fff}
@@ -39,17 +21,9 @@ button{
 .clean{background:#9c27b0;color:#fff}
 .request{background:#e91e63;color:#fff}
 .cancel{background:#777;color:#fff}
-
-.favorite{
-  position:absolute;
-  top:10px;
-  right:12px;
-  font-size:22px;
-  cursor:pointer;
-}
+.favorite{position:absolute;top:10px;right:12px;font-size:22px;cursor:pointer}
 .star-on{color:#ffc107}
 .star-off{color:#bbb}
-
 .time{font-weight:bold;font-size:16px}
 small{color:#555}
 </style>
@@ -58,38 +32,40 @@ small{color:#555}
 <body>
 
 <h1>🧺 ComfortLink 세탁 시스템</h1>
-
 <div class="dashboard" id="dashboard"></div>
 <div id="favorites"></div>
 <div id="app"></div>
 
-<script>
-// ================= 방 번호 =================
-let myRoom = localStorage.getItem("room");
-let usedRooms = JSON.parse(localStorage.getItem("usedRooms")||"[]");
+<script type="module">
+/* ================= Firebase ================= */
+import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
+import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
 
+const firebaseConfig = {
+  apiKey: "AIzaSyALbv48xEDyGtdaNn8MCvF79bqDmEKjjf0",
+  authDomain: "comfortlink-laundry.firebaseapp.com",
+  projectId: "comfortlink-laundry",
+  storageBucket: "comfortlink-laundry.firebasestorage.app",
+  messagingSenderId: "484193931044",
+  appId: "1:484193931044:web:fb528955ca8088950c6db1"
+};
+
+const appFirebase = initializeApp(firebaseConfig);
+const db = getFirestore(appFirebase);
+const stateRef = doc(db,"state","machines");
+
+/* ================= 방 번호 ================= */
+let myRoom = localStorage.getItem("room");
 if(!myRoom){
-  while(true){
-    let input = prompt("방 번호 입력 (예: 203호)");
-    if(!input) continue;
-    let r = input.replace(/[^0-9]/g,"");
-    if(usedRooms.includes(r)){
-      alert("이미 사용 중인 방 번호입니다");
-    }else{
-      myRoom = r;
-      usedRooms.push(r);
-      localStorage.setItem("usedRooms",JSON.stringify(usedRooms));
-      localStorage.setItem("room",myRoom);
-      break;
-    }
-  }
+  myRoom = prompt("방 번호 입력 (예: 203)").replace(/[^0-9]/g,"");
+  localStorage.setItem("room",myRoom);
 }
 
-// ================= 즐겨찾기 =================
+/* ================= 즐겨찾기 ================= */
 let favorites = JSON.parse(localStorage.getItem("favorites")||"[]");
 
-// ================= 기기 =================
-let machines = JSON.parse(localStorage.getItem("machines")) || [
+/* ================= 기기 ================= */
+let machines = [
 {id:1,floor:1,name:"세탁기 1"},
 {id:2,floor:1,name:"건조기 1"},
 {id:3,floor:2,name:"세탁기 1"},
@@ -100,188 +76,153 @@ let machines = JSON.parse(localStorage.getItem("machines")) || [
 {id:8,floor:3,name:"세탁기 2"},
 {id:9,floor:3,name:"건조기 1"},
 {id:10,floor:3,name:"건조기 2"}
-].map(m=>({
-  ...m,
-  status:m.status||"available",
-  room:m.room||null,
-  endTime:m.endTime||null,
-  reservations:m.reservations||[],
-  alerted:false
-}));
+].map(m=>({...m,status:"available",room:null,endTime:null,reservations:[],alerted:false}));
 
-// ================= 시간 =================
-function remain(m){
-  return Math.max(0, Math.ceil((m.endTime - Date.now())/60000));
-}
-
-function parseTime(input){
-  input=input.replace(/\s/g,"");
-  if(input.includes(":")){
-    let [h,m]=input.split(":").map(Number);
-    return h*60+(m||0);
+/* ================= Firestore 동기화 ================= */
+onSnapshot(stateRef,snap=>{
+  if(snap.exists()){
+    machines = snap.data().machines;
+    render();
+  }else{
+    save();
   }
-  let h=input.match(/(\d+)시간/);
-  let m=input.match(/(\d+)분/);
-  return (h?+h[1]*60:0)+(m?+m[1]:0);
+});
+
+function save(){
+  setDoc(stateRef,{machines});
 }
 
-// ================= 대시보드 =================
-function dashboard(){
-  let using = machines.find(m=>m.room==myRoom && m.status=="using");
-  let reserving = machines.find(m=>m.reservations.includes(myRoom));
+/* ================= 시간 ================= */
+const remain=m=>Math.max(0,Math.ceil((m.endTime-Date.now())/60000));
+const parseTime=i=>{
+  i=i.replace(/\s/g,"");
+  if(i.includes(":")){let[a,b]=i.split(":").map(Number);return a*60+(b||0)}
+  let h=i.match(/(\d+)시간/),m=i.match(/(\d+)분/);
+  return (h?+h[1]*60:0)+(m?+m[1]:0);
+};
 
-  document.getElementById("dashboard").innerHTML=`
+/* ================= 대시보드 ================= */
+function dashboard(){
+  let using=machines.find(m=>m.room==myRoom&&m.status=="using");
+  let reserving=machines.find(m=>m.reservations.includes(myRoom));
+  dashboardEl.innerHTML=`
   <strong>${myRoom}호</strong><br>
-  사용중: ${using? using.floor+"층 "+using.name+" ("+remain(using)+"분)": "없음"}<br>
-  예약: ${reserving? reserving.floor+"층 "+reserving.name:"없음"}
+  사용중: ${using?`${using.floor}층 ${using.name} (${remain(using)}분)`:"없음"}<br>
+  예약: ${reserving?`${reserving.floor}층 ${reserving.name}`:"없음"}
   `;
 }
 
-// ================= 카드 HTML =================
+/* ================= UI ================= */
 function machineHTML(m){
-  let starOn = favorites.includes(m.id);
-  let html=`<div class="machine ${m.status}">
-    <div class="favorite ${starOn?"star-on":"star-off"}"
-      onclick="toggleFav(${m.id})">${starOn?"⭐":"☆"}</div>
-
-    <strong>${m.floor}층 ${m.name}</strong><br>`;
-
+  let starOn=favorites.includes(m.id);
+  let h=`<div class="machine ${m.status}">
+  <div class="favorite ${starOn?"star-on":"star-off"}" onclick="toggleFav(${m.id})">${starOn?"⭐":"☆"}</div>
+  <strong>${m.floor}층 ${m.name}</strong><br>`;
   if(m.status=="available"){
-    html+=`
-    🟢 사용 가능<br>
+    h+=`🟢 사용 가능<br>
     <button class="start" onclick="start(${m.id})">사용 시작</button>
     <button class="reserve" onclick="reserve(${m.id})">예약</button>`;
   }
-
   if(m.status=="using"){
-    html+=`
-    🟠 ${m.room}호 사용중<br>
-    ⏰ <span class="time">${remain(m)}분</span><br>
-    <button class="reserve" onclick="reserve(${m.id})">예약</button>`;
-
+    h+=`🟠 ${m.room}호 사용중<br>⏰ <span class="time">${remain(m)}분</span><br>`;
     if(m.room==myRoom){
-      html+=`
-      <button class="extend" onclick="extendTime(${m.id})">시간 연장</button>
+      h+=`<button class="extend" onclick="extendTime(${m.id})">시간 연장</button>
       <button class="finish" onclick="finish(${m.id})">사용 종료</button>`;
     }else{
-      html+=`
-      <button class="request" onclick="requestClean(${m.id})">정리 요청</button>`;
+      h+=`<button class="request" onclick="requestClean(${m.id})">정리 요청</button>`;
     }
-
-    if(remain(m)<=5 && !m.alerted && m.room==myRoom){
-      alert("⏰ 5분 남았습니다!");
-      m.alerted=true;
-    }
-
-    if(remain(m)==0){
-      m.status="finished";
-      if(m.room==myRoom) alert("🔔 사용이 완료되었습니다");
-    }
+    if(remain(m)==0){m.status="finished";notify(m.room,"사용이 완료되었습니다")}
   }
-
   if(m.status=="finished"){
-    html+=`
-    🔴 사용 완료 (${m.room}호)<br>
+    h+=`🔴 사용 완료 (${m.room}호)<br>
     <button class="clean" onclick="clearMachine(${m.id})">정리 완료</button>`;
-    if(m.room!=myRoom){
-      html+=`<button class="request" onclick="requestClean(${m.id})">정리 요청</button>`;
-    }
   }
-
   if(m.reservations.length){
-    html+=`<small>예약: ${m.reservations.join(", ")}호</small>`;
-    if(m.reservations.includes(myRoom)){
-      html+=`<br><button class="cancel" onclick="cancelReserve(${m.id})">예약 취소</button>`;
-    }
+    h+=`<small>예약: ${m.reservations.join(", ")}호</small>`;
+    if(m.reservations.includes(myRoom))
+      h+=`<br><button class="cancel" onclick="cancelReserve(${m.id})">예약 취소</button>`;
   }
-
-  html+=`</div>`;
-  return html;
+  return h+"</div>";
 }
 
-// ================= 렌더 =================
+/* ================= 렌더 ================= */
 function render(){
   dashboard();
-  localStorage.setItem("machines",JSON.stringify(machines));
-  localStorage.setItem("favorites",JSON.stringify(favorites));
-
-  const favBox=document.getElementById("favorites");
-  const app=document.getElementById("app");
-  favBox.innerHTML="";
+  favoritesBox.innerHTML="";
   app.innerHTML="";
-
   if(favorites.length){
-    favBox.innerHTML="<h2>⭐ 즐겨찾기</h2>";
-    machines.filter(m=>favorites.includes(m.id)).forEach(m=>{
-      favBox.innerHTML+=machineHTML(m);
-    });
+    favoritesBox.innerHTML="<h2>⭐ 즐겨찾기</h2>";
+    machines.filter(m=>favorites.includes(m.id)).forEach(m=>favoritesBox.innerHTML+=machineHTML(m));
   }
-
   [1,2,3].forEach(f=>{
     app.innerHTML+=`<h2>${f}층</h2>`;
-    machines.filter(m=>m.floor==f).forEach(m=>{
-      app.innerHTML+=machineHTML(m);
-    });
+    machines.filter(m=>m.floor==f).forEach(m=>app.innerHTML+=machineHTML(m));
   });
 }
 
-// ================= 기능 =================
-function toggleFav(id){
-  favorites.includes(id)
-    ? favorites=favorites.filter(f=>f!=id)
-    : favorites.push(id);
-}
+/* ================= 기능 ================= */
+window.toggleFav=id=>{
+  favorites.includes(id)?favorites=favorites.filter(f=>f!=id):favorites.push(id);
+  localStorage.setItem("favorites",JSON.stringify(favorites));
+  render();
+};
 
-function start(id){
-  if(machines.some(m=>m.room==myRoom && m.status=="using"))
-    return alert("이미 사용 중인 기기가 있습니다");
-
+window.start=id=>{
+  if(machines.some(m=>m.room==myRoom&&m.status=="using"))return alert("이미 사용 중입니다");
   let t=parseTime(prompt("사용 시간 입력"));
-  if(!t) return alert("시간 오류");
-
+  if(!t)return;
   let m=machines.find(x=>x.id==id);
-  m.status="using";
-  m.room=myRoom;
-  m.endTime=Date.now()+t*60000;
-  m.alerted=false;
-}
+  m.status="using";m.room=myRoom;m.endTime=Date.now()+t*60000;
+  save();
+};
 
-function extendTime(id){
+window.extendTime=id=>{
   let t=parseTime(prompt("연장 시간 입력"));
-  if(!t) return;
+  if(!t)return;
   machines.find(x=>x.id==id).endTime+=t*60000;
-}
+  save();
+};
 
-function reserve(id){
-  if(machines.some(m=>m.reservations.includes(myRoom)))
-    return alert("이미 예약 중입니다");
+window.reserve=id=>{
+  if(machines.some(m=>m.reservations.includes(myRoom)))return alert("이미 예약 중");
   machines.find(x=>x.id==id).reservations.push(myRoom);
-}
+  save();
+};
 
-function cancelReserve(id){
+window.cancelReserve=id=>{
   let m=machines.find(x=>x.id==id);
   m.reservations=m.reservations.filter(r=>r!=myRoom);
-}
+  save();
+};
 
-function finish(id){
+window.finish=id=>{
   machines.find(x=>x.id==id).status="finished";
-}
+  save();
+};
 
-function clearMachine(id){
+window.clearMachine=id=>{
   let m=machines.find(x=>x.id==id);
-  m.status="available";
-  m.room=null;
-  m.endTime=null;
-  m.alerted=false;
+  let next=m.reservations.shift();
+  if(next) notify(next,"예약한 세탁기를 사용할 수 있습니다");
+  Object.assign(m,{status:"available",room:null,endTime:null});
+  save();
+};
+
+window.requestClean=id=>{
+  let m=machines.find(x=>x.id==id);
+  notify(m.room,`${myRoom}호에서 정리 요청이 왔습니다`);
+};
+
+function notify(room,msg){
+  if(room==myRoom) alert("🔔 "+msg);
 }
 
-function requestClean(id){
-  alert("📢 사용 중인 방에 정리 요청을 보냈습니다");
-}
-
+/* ================= 시작 ================= */
+const dashboardEl=document.getElementById("dashboard");
+const favoritesBox=document.getElementById("favorites");
+const app=document.getElementById("app");
 setInterval(render,1000);
 render();
 </script>
-
 </body>
 </html>
