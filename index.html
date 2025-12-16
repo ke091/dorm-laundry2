@@ -3,7 +3,6 @@
 <head>
 <meta charset="UTF-8">
 <title>ComfortLink 세탁 시스템</title>
-
 <style>
 body{font-family:Arial;background:#f0f2f5;padding:15px}
 h1{text-align:center}
@@ -61,6 +60,9 @@ if(!myRoom){
   localStorage.setItem("room",myRoom);
 }
 
+// 관리자 방 번호
+const adminRoom = "999";
+
 /* ================= 즐겨찾기 ================= */
 let favorites = JSON.parse(localStorage.getItem("favorites")||"[]");
 
@@ -93,9 +95,7 @@ function save(){
 }
 
 /* ================= 시간 ================= */
-const remain = m =>
-  m.endTime ? Math.max(0,Math.ceil((m.endTime-Date.now())/60000)) : 0;
-
+const remain=m=>Math.max(0,Math.ceil((m.endTime-Date.now())/60000));
 const parseTime=i=>{
   i=i.replace(/\s/g,"");
   if(i.includes(":")){let[a,b]=i.split(":").map(Number);return a*60+(b||0)}
@@ -120,90 +120,67 @@ function machineHTML(m){
   let h=`<div class="machine ${m.status}">
   <div class="favorite ${starOn?"star-on":"star-off"}" onclick="toggleFav(${m.id})">${starOn?"⭐":"☆"}</div>
   <strong>${m.floor}층 ${m.name}</strong><br>`;
-
   if(m.status=="available"){
     h+=`🟢 사용 가능<br>
     <button class="start" onclick="start(${m.id})">사용 시작</button>
     <button class="reserve" onclick="reserve(${m.id})">예약</button>`;
   }
-
   if(m.status=="using"){
-    h+=`🟠 ${m.room}호 사용중<br>
-    ⏰ <span class="time">${remain(m)}분</span><br>`;
-
+    h+=`🟠 ${m.room}호 사용중<br>⏰ <span class="time">${remain(m)}분</span><br>`;
     if(m.room==myRoom){
       h+=`<button class="extend" onclick="extendTime(${m.id})">시간 연장</button>
       <button class="finish" onclick="finish(${m.id})">사용 종료</button>`;
     }else{
-      h+=`<button class="request" onclick="requestClean(${m.id})">정리 요청</button>`;
+      h+=`<button class="request" onclick="requestClean(${m.id})">정리 요청</button>
+      <button class="reserve" onclick="reserve(${m.id})">예약</button>`;
     }
+    if(remain(m)==0){m.status="finished"; notify(m.room,"사용이 완료되었습니다"); save();}
   }
-
   if(m.status=="finished"){
     h+=`🔴 사용 완료 (${m.room}호)<br>
     <button class="clean" onclick="clearMachine(${m.id})">정리 완료</button>`;
   }
-
   if(m.reservations.length){
     h+=`<small>예약: ${m.reservations.join(", ")}호</small>`;
     if(m.reservations.includes(myRoom))
       h+=`<br><button class="cancel" onclick="cancelReserve(${m.id})">예약 취소</button>`;
   }
-
   return h+"</div>";
-}
-
-/* ================= 자동 완료 처리 🔧 ================= */
-function autoFinishCheck(){
-  let changed=false;
-  machines.forEach(m=>{
-    if(m.status==="using" && m.endTime && Date.now()>=m.endTime){
-      m.status="finished";
-      changed=true;
-      if(m.room===myRoom){
-        alert("🔔 사용이 완료되었습니다");
-      }
-    }
-  });
-  if(changed) save();   // 🔥 핵심
 }
 
 /* ================= 렌더 ================= */
 function render(){
-  autoFinishCheck();     // 🔧 추가
   dashboard();
   favoritesBox.innerHTML="";
   app.innerHTML="";
-
   if(favorites.length){
     favoritesBox.innerHTML="<h2>⭐ 즐겨찾기</h2>";
-    machines.filter(m=>favorites.includes(m.id))
-      .forEach(m=>favoritesBox.innerHTML+=machineHTML(m));
+    machines.filter(m=>favorites.includes(m.id)).forEach(m=>favoritesBox.innerHTML+=machineHTML(m));
   }
-
   [1,2,3].forEach(f=>{
     app.innerHTML+=`<h2>${f}층</h2>`;
-    machines.filter(m=>m.floor==f)
-      .forEach(m=>app.innerHTML+=machineHTML(m));
+    machines.filter(m=>m.floor==f).forEach(m=>app.innerHTML+=machineHTML(m));
   });
+  // 관리자 버튼 표시
+  if(myRoom === adminRoom){
+    app.innerHTML += `<button onclick="resetAll()">전체 초기화</button>
+                      <button onclick="resetRoom()">방 번호 초기화</button>`;
+  }
 }
 
 /* ================= 기능 ================= */
 window.toggleFav=id=>{
-  favorites.includes(id)
-    ? favorites=favorites.filter(f=>f!=id)
-    : favorites.push(id);
+  favorites.includes(id)?favorites=favorites.filter(f=>f!=id):favorites.push(id);
   localStorage.setItem("favorites",JSON.stringify(favorites));
   render();
 };
 
 window.start=id=>{
-  if(machines.some(m=>m.room==myRoom&&m.status=="using"))
-    return alert("이미 사용 중입니다");
+  if(machines.some(m=>m.room==myRoom&&m.status=="using"))return alert("이미 사용 중입니다");
   let t=parseTime(prompt("사용 시간 입력"));
   if(!t)return;
   let m=machines.find(x=>x.id==id);
-  m.status="using";m.room=myRoom;m.endTime=Date.now()+t*60000;
+  m.status="using";m.room=myRoom;m.endTime=Date.now()+t*60000; m.alerted=false;
   save();
 };
 
@@ -215,8 +192,7 @@ window.extendTime=id=>{
 };
 
 window.reserve=id=>{
-  if(machines.some(m=>m.reservations.includes(myRoom)))
-    return alert("이미 예약 중");
+  if(machines.some(m=>m.reservations.includes(myRoom)))return alert("이미 예약 중");
   machines.find(x=>x.id==id).reservations.push(myRoom);
   save();
 };
@@ -234,28 +210,43 @@ window.finish=id=>{
 
 window.clearMachine=id=>{
   let m=machines.find(x=>x.id==id);
+  if(myRoom !== m.room) return alert("자신의 기기만 정리 완료 가능합니다");
   let next=m.reservations.shift();
-  if(next && next===myRoom){
-    alert("🔔 예약한 세탁기를 사용할 수 있습니다");
-  }
-  Object.assign(m,{status:"available",room:null,endTime:null});
+  if(next) notify(next,"예약한 세탁기를 사용할 수 있습니다");
+  Object.assign(m,{status:"available",room:null,endTime:null,alerted:false});
   save();
 };
 
 window.requestClean=id=>{
   let m=machines.find(x=>x.id==id);
-  if(m.room!==myRoom){
-    alert(`📢 ${m.room}호에 정리 요청을 보냈습니다`);
-  }
+  if(m.room === myRoom) return; // 자기 자신은 요청 불가
+  notify(m.room,`${myRoom}호에서 정리 요청이 왔습니다`);
+};
+
+function notify(room,msg){
+  if(room==myRoom) alert("🔔 "+msg);
+}
+
+/* ================= 관리자 초기화 ================= */
+window.resetAll=()=>{
+  if(myRoom !== adminRoom) return alert("권한 없음");
+  machines.forEach(m=>Object.assign(m,{status:"available",room:null,endTime:null,reservations:[],alerted:false}));
+  save();
+};
+
+window.resetRoom=()=>{
+  if(myRoom !== adminRoom) return alert("권한 없음");
+  localStorage.removeItem("room");
+  location.reload();
 };
 
 /* ================= 시작 ================= */
 const dashboardEl=document.getElementById("dashboard");
 const favoritesBox=document.getElementById("favorites");
 const app=document.getElementById("app");
-
 setInterval(render,1000);
 render();
 </script>
+
 </body>
 </html>
