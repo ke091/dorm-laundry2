@@ -5,47 +5,26 @@
 <title>ComfortLink 세탁 시스템</title>
 
 <style>
-/* ================= 기본 ================= */
-body{
-  font-family:Arial;
-  background:#f0f2f5;
-  padding:15px;
-}
+body{font-family:Arial;background:#f0f2f5;padding:15px}
 h1{text-align:center}
 h2{margin-top:20px}
 
-/* ================= 카드 ================= */
-.dashboard{
-  background:#fff;
-  padding:15px;
-  border-radius:12px;
-  margin-bottom:15px;
-}
-.machine{
-  background:#fff;
-  padding:16px;
-  margin:12px 0;
-  border-radius:14px;
-  position:relative;
-}
+.dashboard{background:#fff;padding:15px;border-radius:12px;margin-bottom:15px}
+.machine{background:#fff;padding:16px;margin:12px 0;border-radius:14px;position:relative}
 
-/* ================= 상태 ================= */
 .available{border-left:8px solid #4caf50}
 .using{border-left:8px solid #ff9800}
 .finished{border-left:8px solid #f44336}
 
-/* ================= 버튼 (모바일 최적화 핵심) ================= */
 button{
   margin:6px 4px;
-  padding:14px 18px;      /* 손가락 터치용 */
+  padding:14px 18px;
   font-size:16px;
   border:none;
   border-radius:10px;
   cursor:pointer;
-  min-height:48px;        /* 모바일 권장 터치 높이 */
+  min-height:48px;
 }
-
-/* 버튼 색상 */
 .start{background:#4caf50;color:#fff}
 .reserve{background:#2196f3;color:#fff}
 .finish{background:#ff5722;color:#fff}
@@ -54,30 +33,15 @@ button{
 .request{background:#e91e63;color:#fff}
 .cancel{background:#777;color:#fff}
 
-/* ================= 즐겨찾기 ================= */
-.favorite{
-  position:absolute;
-  top:10px;
-  right:12px;
-  font-size:24px;
-  cursor:pointer;
-}
+.favorite{position:absolute;top:10px;right:12px;font-size:24px;cursor:pointer}
 .star-on{color:#ffc107}
 .star-off{color:#bbb}
 
-/* ================= 텍스트 ================= */
-.time{
-  font-weight:bold;
-  font-size:16px;
-}
+.time{font-weight:bold}
 small{color:#555}
 
-/* ================= 모바일 전용 ================= */
-@media (max-width: 600px){
-  button{
-    width:100%;        /* 버튼 가로 꽉 차게 */
-    margin:6px 0;
-  }
+@media (max-width:600px){
+  button{width:100%;margin:6px 0}
 }
 </style>
 </head>
@@ -92,7 +56,7 @@ small{color:#555}
 <script type="module">
 /* ================= Firebase ================= */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
-import { getFirestore, doc, setDoc, getDoc, onSnapshot } 
+import { getFirestore, doc, setDoc, getDoc, onSnapshot }
 from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -104,15 +68,15 @@ const firebaseConfig = {
   appId: "1:484193931044:web:fb528955ca8088950c6db1"
 };
 
-const appFirebase = initializeApp(firebaseConfig);
-const db = getFirestore(appFirebase);
+const appFB = initializeApp(firebaseConfig);
+const db = getFirestore(appFB);
 const stateRef = doc(db,"state","machines");
 const adminRef = doc(db,"state","admin");
 
 /* ================= 방 번호 ================= */
 let myRoom = localStorage.getItem("room");
 if(!myRoom){
-  myRoom = prompt("방 번호 입력 (예: 203)").replace(/[^0-9]/g,"");
+  myRoom = prompt("방 번호 입력").replace(/[^0-9]/g,"");
   localStorage.setItem("room",myRoom);
 }
 const adminRoom = "999";
@@ -121,7 +85,7 @@ const adminRoom = "999";
 let favorites = JSON.parse(localStorage.getItem("favorites")||"[]");
 
 /* ================= 기기 ================= */
-let machines = [
+let machines=[
 {id:1,floor:1,name:"세탁기 1"},
 {id:2,floor:1,name:"건조기 1"},
 {id:3,floor:2,name:"세탁기 1"},
@@ -136,27 +100,29 @@ let machines = [
 
 /* ================= Firestore ================= */
 onSnapshot(stateRef,snap=>{
-  if(snap.exists()){
-    machines = snap.data().machines;
-    render();
-  }else{
-    save();
-  }
+  if(snap.exists()) machines=snap.data().machines;
+  else save();
+  render();
 });
+const save=()=>setDoc(stateRef,{machines});
 
-function save(){
-  setDoc(stateRef,{machines});
-}
-
-/* ================= 관리자 방번호 초기화 감시 ================= */
+/* ================= 관리자 방 초기화 감시 (전체 + 특정) ================= */
 onSnapshot(adminRef,snap=>{
   if(!snap.exists()) return;
-  const serverReset = snap.data().resetVersion || 0;
-  const localReset = Number(localStorage.getItem("resetVersion")||0);
-  if(serverReset > localReset){
-    localStorage.setItem("resetVersion",serverReset);
+  const data=snap.data();
+
+  const server=data.resetVersion||0;
+  const local=Number(localStorage.getItem("resetVersion")||0);
+  if(server>local){
+    localStorage.setItem("resetVersion",server);
     localStorage.removeItem("room");
     alert("관리자에 의해 방 번호가 초기화되었습니다");
+    location.reload();
+  }
+
+  if(data.resetTarget===myRoom){
+    localStorage.removeItem("room");
+    alert("관리자에 의해 내 방 번호가 초기화되었습니다");
     location.reload();
   }
 });
@@ -178,9 +144,9 @@ function dashboard(){
   let using=machines.find(m=>m.room==myRoom&&m.status=="using");
   let reserving=machines.find(m=>m.reservations.includes(myRoom));
   dashboardEl.innerHTML=`
-  <strong>${myRoom}호</strong><br>
-  사용중: ${using?`${using.floor}층 ${using.name} (${remain(using)}분)`:"없음"}<br>
-  예약: ${reserving?`${reserving.floor}층 ${reserving.name}`:"없음"}
+    <b>${myRoom}호</b><br>
+    사용중: ${using?`${using.floor}층 ${using.name} (${remain(using)}분)`:"없음"}<br>
+    예약: ${reserving?`${reserving.floor}층 ${reserving.name}`:"없음"}
   `;
 }
 
@@ -189,7 +155,7 @@ function machineHTML(m){
   let starOn=favorites.includes(m.id);
   let h=`<div class="machine ${m.status}">
   <div class="favorite ${starOn?"star-on":"star-off"}" onclick="toggleFav(${m.id})">${starOn?"⭐":"☆"}</div>
-  <strong>${m.floor}층 ${m.name}</strong><br>`;
+  <b>${m.floor}층 ${m.name}</b><br>`;
   if(m.status=="available"){
     h+=`🟢 사용 가능<br>
     <button class="start" onclick="start(${m.id})">사용 시작</button>
@@ -197,16 +163,15 @@ function machineHTML(m){
   }
   if(m.status=="using"){
     h+=`🟠 ${m.room}호 사용중<br>⏰ <span class="time">${remain(m)}분</span><br>`;
-    if(m.room==myRoom){
+    if(m.room==myRoom)
       h+=`<button class="extend" onclick="extendTime(${m.id})">시간 연장</button>
-      <button class="finish" onclick="finish(${m.id})">사용 종료</button>`;
-    }else{
+           <button class="finish" onclick="finish(${m.id})">사용 종료</button>`;
+    else
       h+=`<button class="request" onclick="requestClean(${m.id})">정리 요청</button>
-      <button class="reserve" onclick="reserve(${m.id})">예약</button>`;
-    }
+           <button class="reserve" onclick="reserve(${m.id})">예약</button>`;
     if(remain(m)==0){
       m.status="finished";
-      notify(m.room,"사용이 완료되었습니다");
+      notify(m.room,"사용 완료");
       save();
     }
   }
@@ -227,46 +192,65 @@ function render(){
   dashboard();
   favoritesBox.innerHTML="";
   app.innerHTML="";
+
   if(favorites.length){
     favoritesBox.innerHTML="<h2>⭐ 즐겨찾기</h2>";
     machines.filter(m=>favorites.includes(m.id))
       .forEach(m=>favoritesBox.innerHTML+=machineHTML(m));
   }
+
   [1,2,3].forEach(f=>{
     app.innerHTML+=`<h2>${f}층</h2>`;
     machines.filter(m=>m.floor==f)
       .forEach(m=>app.innerHTML+=machineHTML(m));
   });
+
   if(myRoom===adminRoom){
     app.innerHTML+=`
+      <h2>👑 관리자</h2>
       <button onclick="resetAll()">전체 기기 초기화</button>
-      <button onclick="resetRoom()">전체 방 번호 초기화</button>`;
+      <button onclick="resetRoom()">전체 방 번호 초기화</button>
+      <h3>📋 현재 방 목록</h3>
+      ${roomListHTML()}
+    `;
   }
+}
+
+/* ================= 관리자 방 목록 ================= */
+function roomListHTML(){
+  const rooms=new Set();
+  machines.forEach(m=>{
+    if(m.room) rooms.add(m.room);
+    m.reservations.forEach(r=>rooms.add(r));
+  });
+  if(!rooms.size) return "<small>활성 방 없음</small>";
+  let html="";
+  rooms.forEach(r=>{
+    html+=`${r}호 
+      <button onclick="resetTarget('${r}')">이 방 초기화</button><br>`;
+  });
+  return html;
 }
 
 /* ================= 기능 ================= */
 window.toggleFav=id=>{
-  favorites.includes(id)
-    ? favorites=favorites.filter(f=>f!=id)
-    : favorites.push(id);
+  favorites.includes(id)?favorites=favorites.filter(f=>f!=id):favorites.push(id);
   localStorage.setItem("favorites",JSON.stringify(favorites));
   render();
 };
 
 window.start=id=>{
   if(machines.some(m=>m.room==myRoom&&m.status=="using"))
-    return alert("이미 사용 중입니다");
-  let t=parseTime(prompt("사용 시간 입력"));
+    return alert("이미 사용 중");
+  let t=parseTime(prompt("사용 시간"));
   if(!t)return;
   let m=machines.find(x=>x.id==id);
-  m.status="using";
-  m.room=myRoom;
-  m.endTime=Date.now()+t*60000;
+  m.status="using";m.room=myRoom;m.endTime=Date.now()+t*60000;
   save();
 };
 
 window.extendTime=id=>{
-  let t=parseTime(prompt("연장 시간 입력"));
+  let t=parseTime(prompt("연장 시간"));
   if(!t)return;
   machines.find(x=>x.id==id).endTime+=t*60000;
   save();
@@ -292,18 +276,17 @@ window.finish=id=>{
 
 window.clearMachine=id=>{
   let m=machines.find(x=>x.id==id);
-  if(myRoom!==m.room && myRoom!==adminRoom)
-    return alert("자신의 기기만 정리 완료 가능합니다");
+  if(myRoom!==m.room&&myRoom!==adminRoom)
+    return alert("권한 없음");
   let next=m.reservations.shift();
-  if(next) notify(next,"예약한 세탁기를 사용할 수 있습니다");
+  if(next) notify(next,"예약한 기기를 사용할 수 있습니다");
   Object.assign(m,{status:"available",room:null,endTime:null});
   save();
 };
 
 window.requestClean=id=>{
   let m=machines.find(x=>x.id==id);
-  if(m.room===myRoom)return;
-  notify(m.room,`${myRoom}호에서 정리 요청이 왔습니다`);
+  if(m.room!==myRoom) notify(m.room,`${myRoom}호에서 정리 요청`);
 };
 
 function notify(room,msg){
@@ -312,7 +295,7 @@ function notify(room,msg){
 
 /* ================= 관리자 ================= */
 window.resetAll=()=>{
-  if(myRoom!==adminRoom)return alert("권한 없음");
+  if(myRoom!==adminRoom)return;
   machines.forEach(m=>Object.assign(m,{
     status:"available",room:null,endTime:null,reservations:[],alerted:false
   }));
@@ -320,11 +303,17 @@ window.resetAll=()=>{
 };
 
 window.resetRoom=async()=>{
-  if(myRoom!==adminRoom)return alert("권한 없음");
+  if(myRoom!==adminRoom)return;
   const snap=await getDoc(adminRef);
   const cur=snap.exists()?snap.data().resetVersion||0:0;
   await setDoc(adminRef,{resetVersion:cur+1});
-  alert("모든 사용자의 방 번호가 초기화되었습니다");
+  alert("모든 방 번호 초기화 완료");
+};
+
+window.resetTarget=async room=>{
+  if(myRoom!==adminRoom)return;
+  await setDoc(adminRef,{resetTarget:room,resetVersion:Date.now()});
+  alert(`${room}호 초기화 완료`);
 };
 
 /* ================= 시작 ================= */
