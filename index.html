@@ -74,12 +74,12 @@ const stateRef = doc(db,"state","machines");
 const adminRef = doc(db,"state","admin");
 
 /* ================= 방 번호 ================= */
+const adminRoom = "999";
 let myRoom = localStorage.getItem("room");
 if(!myRoom){
   myRoom = prompt("방 번호 입력").replace(/[^0-9]/g,"");
   localStorage.setItem("room",myRoom);
 }
-const adminRoom = "999";
 
 /* ================= 즐겨찾기 ================= */
 let favorites = JSON.parse(localStorage.getItem("favorites")||"[]");
@@ -106,21 +106,30 @@ onSnapshot(stateRef,snap=>{
 });
 const save=()=>setDoc(stateRef,{machines});
 
-/* ================= 관리자 방 초기화 감시 (전체 + 특정) ================= */
+/* ================= 관리자 초기화 감시 ================= */
 onSnapshot(adminRef,snap=>{
   if(!snap.exists()) return;
   const data=snap.data();
 
+  /* 전체 초기화 */
   const server=data.resetVersion||0;
   const local=Number(localStorage.getItem("resetVersion")||0);
   if(server>local){
     localStorage.setItem("resetVersion",server);
-    localStorage.removeItem("room");
-    alert("관리자에 의해 방 번호가 초기화되었습니다");
-    location.reload();
+    if(myRoom!==adminRoom){
+      localStorage.removeItem("room");
+      alert("관리자에 의해 방 번호가 초기화되었습니다");
+      location.reload();
+    }
   }
 
-  if(data.resetTarget===myRoom){
+  /* 특정 방 초기화 (1회성) */
+  if(
+    data.resetTarget===myRoom &&
+    myRoom!==adminRoom &&
+    localStorage.getItem("handledTarget")!=data.resetVersion
+  ){
+    localStorage.setItem("handledTarget",data.resetVersion);
     localStorage.removeItem("room");
     alert("관리자에 의해 내 방 번호가 초기화되었습니다");
     location.reload();
@@ -162,18 +171,13 @@ function machineHTML(m){
     <button class="reserve" onclick="reserve(${m.id})">예약</button>`;
   }
   if(m.status=="using"){
-    h+=`🟠 ${m.room}호 사용중<br>⏰ <span class="time">${remain(m)}분</span><br>`;
+    h+=`🟠 ${m.room}호 사용중<br>⏰ ${remain(m)}분<br>`;
     if(m.room==myRoom)
       h+=`<button class="extend" onclick="extendTime(${m.id})">시간 연장</button>
            <button class="finish" onclick="finish(${m.id})">사용 종료</button>`;
     else
       h+=`<button class="request" onclick="requestClean(${m.id})">정리 요청</button>
            <button class="reserve" onclick="reserve(${m.id})">예약</button>`;
-    if(remain(m)==0){
-      m.status="finished";
-      notify(m.room,"사용 완료");
-      save();
-    }
   }
   if(m.status=="finished"){
     h+=`🔴 사용 완료 (${m.room}호)<br>
@@ -210,7 +214,7 @@ function render(){
       <h2>👑 관리자</h2>
       <button onclick="resetAll()">전체 기기 초기화</button>
       <button onclick="resetRoom()">전체 방 번호 초기화</button>
-      <h3>📋 현재 방 목록</h3>
+      <h3>현재 방 목록</h3>
       ${roomListHTML()}
     `;
   }
@@ -238,66 +242,51 @@ window.toggleFav=id=>{
   localStorage.setItem("favorites",JSON.stringify(favorites));
   render();
 };
-
 window.start=id=>{
-  if(machines.some(m=>m.room==myRoom&&m.status=="using"))
-    return alert("이미 사용 중");
+  if(machines.some(m=>m.room==myRoom&&m.status=="using"))return alert("이미 사용 중");
   let t=parseTime(prompt("사용 시간"));
   if(!t)return;
   let m=machines.find(x=>x.id==id);
   m.status="using";m.room=myRoom;m.endTime=Date.now()+t*60000;
   save();
 };
-
 window.extendTime=id=>{
   let t=parseTime(prompt("연장 시간"));
   if(!t)return;
   machines.find(x=>x.id==id).endTime+=t*60000;
   save();
 };
-
 window.reserve=id=>{
-  if(machines.some(m=>m.reservations.includes(myRoom)))
-    return alert("이미 예약 중");
+  if(machines.some(m=>m.reservations.includes(myRoom)))return alert("이미 예약 중");
   machines.find(x=>x.id==id).reservations.push(myRoom);
   save();
 };
-
 window.cancelReserve=id=>{
   let m=machines.find(x=>x.id==id);
   m.reservations=m.reservations.filter(r=>r!=myRoom);
   save();
 };
-
 window.finish=id=>{
   machines.find(x=>x.id==id).status="finished";
   save();
 };
-
 window.clearMachine=id=>{
   let m=machines.find(x=>x.id==id);
-  if(myRoom!==m.room&&myRoom!==adminRoom)
-    return alert("권한 없음");
+  if(myRoom!==m.room&&myRoom!==adminRoom)return alert("권한 없음");
   let next=m.reservations.shift();
-  if(next) notify(next,"예약한 기기를 사용할 수 있습니다");
   Object.assign(m,{status:"available",room:null,endTime:null});
   save();
 };
-
 window.requestClean=id=>{
   let m=machines.find(x=>x.id==id);
-  if(m.room!==myRoom) notify(m.room,`${myRoom}호에서 정리 요청`);
+  if(m.room!==myRoom) alert(`${m.room}호에 정리 요청 전달`);
 };
-
-function notify(room,msg){
-  if(room==myRoom) alert("🔔 "+msg);
-}
 
 /* ================= 관리자 ================= */
 window.resetAll=()=>{
   if(myRoom!==adminRoom)return;
   machines.forEach(m=>Object.assign(m,{
-    status:"available",room:null,endTime:null,reservations:[],alerted:false
+    status:"available",room:null,endTime:null,reservations:[]
   }));
   save();
 };
@@ -307,12 +296,14 @@ window.resetRoom=async()=>{
   const snap=await getDoc(adminRef);
   const cur=snap.exists()?snap.data().resetVersion||0:0;
   await setDoc(adminRef,{resetVersion:cur+1});
-  alert("모든 방 번호 초기화 완료");
+  alert("전체 방 번호 초기화 완료");
 };
 
 window.resetTarget=async room=>{
   if(myRoom!==adminRoom)return;
-  await setDoc(adminRef,{resetTarget:room,resetVersion:Date.now()});
+  const v=Date.now();
+  await setDoc(adminRef,{resetTarget:room,resetVersion:v});
+  setTimeout(()=>setDoc(adminRef,{resetTarget:null,resetVersion:v}),800);
   alert(`${room}호 초기화 완료`);
 };
 
